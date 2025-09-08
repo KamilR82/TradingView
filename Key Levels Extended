@@ -1,0 +1,311 @@
+//@version=6
+indicator(title = 'Key Levels Extended', shorttitle = 'Key Levels', overlay = true)
+
+isTFless(tf) => //is chart selected TF less than input string value (D,W,M)
+    timeframe.in_seconds() < timeframe.in_seconds(tf)
+
+rounding(value) =>
+    float result = if value > 100000
+        math.round(value) //0digits
+    else if value > 10000
+        math.round(value * 10) / 10 //1digits
+    else if value > 1000
+        math.round(value * 100) / 100 //2digits
+    else if value > 100
+        math.round(value * 1000) / 1000 //3digits
+    else if value > 0
+        math.round(value * 10000) / 10000 //4digits
+    else
+        value
+    result
+
+//settings
+bool bATH = input.bool(false, 'All Time High', inline = 'all time')
+bool bATL = input.bool(false, 'All Time Low', inline = 'all time')
+bool bAT_flags = input.bool(true, '(Flags)', inline = 'all time')
+//yearly, monthly, weekly open
+bool bYearly = input.bool(true, 'Yearly', group = 'open price', inline = 'opens')
+bool bMonthly = input.bool(false, 'Monthly', group = 'open price', inline = 'opens')
+bool bWeekly = input.bool(true, 'Weekly', group = 'open price', inline = 'opens')
+bool bDaily = input.bool(true, 'Daily', group = 'open price', inline = 'opens')
+//range
+bool bPWrange = input.bool(true, 'Previous Week', group = 'range (high/mid/low)', inline = 'range')
+bool bMonday = input.bool(true, 'Monday', group = 'range (high/mid/low)', inline = 'range')
+bool bMid = input.bool(false, '(Mid 50%)', group = 'range (high/mid/low)', inline = 'range')
+//IKH / Ichimoku Kinko Hyo / Equilibrium
+bool bIchimoku_lock = input.bool(false, 'Lock', group = 'ichimoku kinko hyo / equilibrium', inline = 'ichi_lock')
+string sIchimoku_tf = input.string(defval = 'D', title = 'to', options = ['D', '2D', '3D', 'W', 'M'], group = 'ichimoku kinko hyo / equilibrium', inline = 'ichi_lock')
+string sIchimoku_lock = input.string(defval = 'lower TF', title = 'on', options = ['lower TF', 'any TF'], group = 'ichimoku kinko hyo / equilibrium', inline = 'ichi_lock')
+bool bIchimoku_lock_lock = bIchimoku_lock and (sIchimoku_lock == 'any TF' ? true : isTFless(sIchimoku_tf)) //locked and (any TF or less than selected TF)
+bool bIchimokuKijun = input.bool(true, 'Kijun Sen', group = 'ichimoku kinko hyo / equilibrium', inline = 'kijun')
+int iIchimokuKijun = input.int(60, '(Base Line)', minval = 2, group = 'ichimoku kinko hyo / equilibrium', inline = 'kijun', tooltip = 'Kijun Sen: 24 forex / 60 crypto\nKijun Sen reflects the equilibrium, or 50% retracement of prices, taking volatility into account. A flat horizontal Kijun Sen means the market is consolidating.')
+bool bIchimokuTenkan = input.bool(true, 'Tenkan Sen', group = 'ichimoku kinko hyo / equilibrium', inline = 'tenkan')
+int iIchimokuTenkan = input.int(20, '(Conversion)', minval = 1, group = 'ichimoku kinko hyo / equilibrium', inline = 'tenkan', tooltip = 'Tenkan Sen: 9 forex / 20 crypto\nA strong buy signal occurs when the Tenkan-Sen (red line) crosses above the Kijun-Sen (blue line) from below. A strong sell signal occurs when the opposite occurs (green crosses blue).') //The signals must be above cloud for a buy and below the cloud for a sell.
+bool bIchimokuKumo = input.bool(false, 'Kumo', group = 'ichimoku kinko hyo / equilibrium', inline = 'kumo', tooltip = 'Senkou (Leading) Span: 52 forex / 120 crypto\nLagging Span (Displacement): 26 forex / 30 crypto\nWhen prices are above the cloud, the trend is up. When prices are below the cloud, the trend is down.')
+int iIchimokuSenkou = input.int(120, '', minval = 1, group = 'ichimoku kinko hyo / equilibrium', inline = 'kumo') // 52 forex / 120 crypto
+int iIchimokuDisplacement = input.int(30, '', minval = 1, group = 'ichimoku kinko hyo / equilibrium', inline = 'kumo') // 26 forex / 30 crypto
+//levels appearance
+string lineStyle = input.string(defval = 'Dashed', title = 'Line Style', options = ['Solid', 'Dashed', 'Dotted'], group = 'levels appearance', inline = 'line')
+linestyles = lineStyle == 'Dashed' ? line.style_dashed : lineStyle == 'Dotted' ? line.style_dotted : line.style_solid
+string lineWidth = input.string(defval = 'Small', title = 'Width', options = ['Small', 'Medium', 'Large'], group = 'levels appearance', inline = 'line')
+linewidths = lineWidth == 'Small' ? 1 : lineWidth == 'Medium' ? 2 : 3
+string lbl_style = input.string(defval = 'Short', title = 'Label Text', options = ['Full', 'Short', 'Price', 'Mixed'], group = 'levels appearance', inline = 'label')
+string lbl_size = input.string(defval = 'Medium', title = 'Size', options = ['Small', 'Medium', 'Large'], group = 'levels appearance', inline = 'label')
+lblsize = lbl_size == 'Small' ? size.small : lbl_size == 'Large' ? size.large : size.normal
+int lbl_offset = input.int(defval = 12, title = 'Label Offset', minval = 5, maxval = 100, group = 'levels appearance', inline = 'offset')
+bool bInfoBox = input.bool(false, 'Info Box', group = 'levels appearance', inline = 'offset')
+
+//global variables
+var line lineYearly = na
+var line lineMonthly = na
+var line lineWeekly = na
+var line lineDaily = na
+var line linePWO = na
+var line linePWH = na
+var line linePWM = na
+var line linePWL = na
+var line lineATH = na
+var line lineATL = na
+var line lineMondayH = na
+var line lineMondayM = na
+var line lineMondayL = na
+var line lineKijun = na
+var line lineTenkan = na
+
+var label lblYearly = na
+var label lblMonthly = na
+var label lblWeekly = na
+var label lblDaily = na
+var label lblPWO = na
+var label lblPWH = na
+var label lblPWM = na
+var label lblPWL = na
+var label lblATH = na
+var label lblATHago = na
+var label lblATL = na
+var label lblATLago = na
+var label lblMondayH = na
+var label lblMondayM = na
+var label lblMondayL = na
+var label lblKijun = na
+var label lblTenkan = na
+
+color clr_ath = color.new(color.lime, 20)
+color clr_atl = color.new(color.fuchsia, 20)
+color clr_open = color.new(#2596be, 20) //color.blue
+color clr_range_m = color.new(color.orange, 20) //monday range
+color clr_range_m_mid = color.new(color.orange, 60) //monday range 50%
+color clr_range_w = color.new(color.yellow, 20) //weekly range
+color clr_range_w_mid = color.new(color.yellow, 60) //weekly range 50%
+
+//ATH,ATL
+getATHL() =>
+    var tH = 0
+    var vH = 0.0
+    var tL = 0
+    var vL = 0.0
+    if high > vH
+        tH := time
+        vH := high
+    if low < vL or vL == 0
+        tL := time
+        vL := low
+    [tH, vH, tL, vL]
+    //Monday H/L
+getMondayHL() =>
+    var t = 0
+    var vH = 0.0
+    var vL = 0.0
+    if dayofweek(time) == 2 and timenow - time > 86400000 //2=Monday and if today is monday then previous monday data will remain
+        t := time
+        vH := high
+        vL := low
+    [t, vH, vL]
+[tATH, vATH, tATL, vATL] = request.security(syminfo.tickerid, 'D', getATHL(), lookahead = barmerge.lookahead_off)
+[tMonday, vMondayH, vMondayL] = request.security(syminfo.tickerid, 'D', getMondayHL(), lookahead = barmerge.lookahead_off)
+[tYearly, oYearly] = request.security(syminfo.tickerid, '12M', [time[0], open[0]], lookahead = barmerge.lookahead_off)
+[tMonthly, oMonthly] = request.security(syminfo.tickerid, 'M', [time[0], open[0]], lookahead = barmerge.lookahead_off)
+[tWeekly, oWeekly, tPW, pPWH, pPWL] = request.security(syminfo.tickerid, 'W', [time[0], open[0], time[1], high[1], low[1]], lookahead = barmerge.lookahead_off)
+[tDaily, oDaily] = request.security(syminfo.tickerid, 'D', [time[0], open[0]], lookahead = barmerge.lookahead_off)
+
+if barstate.islast
+    vMondayM = vMondayL + (vMondayH - vMondayL) / 2 //Monday Mid
+    pPWM = pPWL + (pPWH - pPWL) / 2 //Previous Week Mid
+    //lbl_style - 'Full', 'Short', 'Price', 'Mixed'
+    string textATH = lbl_style == 'Full' ? 'All Time High' : lbl_style == 'Short' ? 'ATH' : lbl_style == 'Price' ? str.tostring(vATH) : 'ATH ' + str.tostring(vATH)
+    string textATL = lbl_style == 'Full' ? 'All Time Low' : lbl_style == 'Short' ? 'ATL' : lbl_style == 'Price' ? str.tostring(vATL) : 'ATL ' + str.tostring(vATL)
+    string textMH = lbl_style == 'Full' ? 'Monday High' : lbl_style == 'Short' ? 'MdH' : lbl_style == 'Price' ? str.tostring(vMondayH) : 'MdH ' + str.tostring(vMondayH)
+    string textMM = lbl_style == 'Full' ? 'Monday Mid' : lbl_style == 'Short' ? 'MdM' : lbl_style == 'Price' ? str.tostring(vMondayM) : 'MdM ' + str.tostring(vMondayM)
+    string textML = lbl_style == 'Full' ? 'Monday Low' : lbl_style == 'Short' ? 'MdL' : lbl_style == 'Price' ? str.tostring(vMondayL) : 'MdL ' + str.tostring(vMondayL)
+    string textYO = lbl_style == 'Full' ? 'Yearly Open' : lbl_style == 'Short' ? 'YO' : lbl_style == 'Price' ? str.tostring(oYearly) : 'YO ' + str.tostring(oYearly)
+    string textMO = lbl_style == 'Full' ? 'Monthly Open' : lbl_style == 'Short' ? 'MO' : lbl_style == 'Price' ? str.tostring(oMonthly) : 'MO ' + str.tostring(oMonthly)
+    string textWO = lbl_style == 'Full' ? 'Weekly Open' : lbl_style == 'Short' ? 'WO' : lbl_style == 'Price' ? str.tostring(oWeekly) : 'WO ' + str.tostring(oWeekly)
+    string textPWH = lbl_style == 'Full' ? 'Previous Week High' : lbl_style == 'Short' ? 'PWH' : lbl_style == 'Price' ? str.tostring(pPWH) : 'PWH ' + str.tostring(pPWH)
+    string textPWM = lbl_style == 'Full' ? 'Previous Week Mid' : lbl_style == 'Short' ? 'PWM' : lbl_style == 'Price' ? str.tostring(pPWM) : 'PWM ' + str.tostring(pPWM)
+    string textPWL = lbl_style == 'Full' ? 'Previous Week Low' : lbl_style == 'Short' ? 'PWL' : lbl_style == 'Price' ? str.tostring(pPWL) : 'PWL ' + str.tostring(pPWL)
+    string textDO = lbl_style == 'Full' ? 'Daily Open' : lbl_style == 'Short' ? 'DO' : lbl_style == 'Price' ? str.tostring(oDaily) : 'DO ' + str.tostring(oDaily)
+
+    if vMondayH == pPWH //same Monday High & Previous Week High
+        textMH := textPWH + ' & ' + textMH
+        textPWH := textMH
+    if vMondayM == pPWM //same Monday Mid & Previous Week Mid
+        textMM := textPWM + ' & ' + textMM
+        textPWM := textMM
+    if vMondayL == pPWL //same Monday Low & Previous Week Low
+        textML := textPWL + ' & ' + textML
+        textPWL := textML
+
+    if bAT_flags
+        label.delete(lblATHago)
+        lblATHago := label.new(tATH, vATH, 'ATH: ' + str.tostring(vATH, format.mintick) + '\n' + str.tostring(math.round((timenow - tATH) / 86400000)) + ' days ago', xloc.bar_time, yloc.price, clr_ath, label.style_label_lower_left)
+        label.delete(lblATLago)
+        lblATLago := label.new(tATL, vATL, 'ATL: ' + str.tostring(vATL, format.mintick) + '\n' + str.tostring(math.round((timenow - tATL) / 86400000)) + ' days ago', xloc.bar_time, yloc.price, clr_atl, label.style_label_upper_left)
+    if vATH > 0 and bATH
+        line.delete(lineATH)
+        lineATH := line.new(tATH, vATH, timenow, vATH, xloc.bar_time, extend.right, clr_ath, linestyles, linewidths)
+        label.delete(lblATH)
+        lblATH := label.new(bar_index + lbl_offset, vATH, textATH, xloc.bar_index, style = label.style_none, textcolor = clr_ath, size = lblsize, textalign = text.align_left, tooltip = str.tostring(vATH))
+    if vATL > 0 and bATL
+        line.delete(lineATL)
+        lineATL := line.new(tATL, vATL, timenow, vATL, xloc.bar_time, extend.right, clr_atl, linestyles, linewidths)
+        label.delete(lblATL)
+        lblATL := label.new(bar_index + lbl_offset, vATL, textATL, xloc.bar_index, style = label.style_none, textcolor = clr_atl, size = lblsize, textalign = text.align_left, tooltip = str.tostring(vATL))
+    if oYearly > 0 and bYearly
+        line.delete(lineYearly)
+        lineYearly := line.new(tYearly, oYearly, timenow, oYearly, xloc.bar_time, extend.right, clr_open, linestyles, linewidths)
+        label.delete(lblYearly)
+        lblYearly := label.new(bar_index + lbl_offset, oYearly, textYO, xloc.bar_index, style = label.style_none, textcolor = clr_open, size = lblsize, textalign = text.align_left, tooltip = str.tostring(oYearly))
+    if oMonthly > 0 and bMonthly
+        line.delete(lineMonthly)
+        lineMonthly := line.new(tMonthly, oMonthly, timenow, oMonthly, xloc.bar_time, extend.right, clr_open, linestyles, linewidths)
+        label.delete(lblMonthly)
+        lblMonthly := label.new(bar_index + lbl_offset, oMonthly, textMO, xloc.bar_index, style = label.style_none, textcolor = clr_open, size = lblsize, textalign = text.align_left, tooltip = str.tostring(oMonthly))
+    if timeframe.isintraday or timeframe.isdaily //draw weekly if TF is D or less
+        if oWeekly > 0 and bWeekly //current week open (monday -> Weekly Open is same as Daily Open)
+            line.delete(lineWeekly)
+            lineWeekly := line.new(tWeekly, oWeekly, timenow, oWeekly, xloc.bar_time, extend.right, clr_open, linestyles, linewidths)
+            label.delete(lblWeekly)
+            lblWeekly := label.new(bar_index + lbl_offset, oWeekly, dayofweek(timenow) != 2 ? textWO : textWO + ' & ' + textDO, xloc.bar_index, style = label.style_none, textcolor = clr_open, size = lblsize, textalign = text.align_left, tooltip = str.tostring(oWeekly))
+        if bMonday
+            if vMondayH > 0 //high
+                line.delete(lineMondayH)
+                lineMondayH := line.new(tMonday, vMondayH, timenow, vMondayH, xloc.bar_time, extend.right, clr_range_m, linestyles, linewidths)
+                label.delete(lblMondayH)
+                lblMondayH := label.new(bar_index + lbl_offset, vMondayH, textMH, xloc.bar_index, style = label.style_none, textcolor = clr_range_m, size = lblsize, textalign = text.align_left, tooltip = str.tostring(vMondayH))
+            if vMondayM > 0 and bMid //mid
+                line.delete(lineMondayM)
+                lineMondayM := line.new(tMonday, vMondayM, timenow, vMondayM, xloc.bar_time, extend.right, clr_range_m_mid, linestyles, linewidths)
+                label.delete(lblMondayM)
+                lblMondayM := label.new(bar_index + lbl_offset, vMondayM, textMM, xloc.bar_index, style = label.style_none, textcolor = clr_range_m_mid, size = lblsize, textalign = text.align_left, tooltip = str.tostring(vMondayM))
+            if vMondayL > 0 //low
+                line.delete(lineMondayL)
+                lineMondayL := line.new(tMonday, vMondayL, timenow, vMondayL, xloc.bar_time, extend.right, clr_range_m, linestyles, linewidths)
+                label.delete(lblMondayL)
+                lblMondayL := label.new(bar_index + lbl_offset, vMondayL, textML, xloc.bar_index, style = label.style_none, textcolor = clr_range_m, size = lblsize, textalign = text.align_left, tooltip = str.tostring(vMondayL))
+        if bPWrange //previous week range
+            if pPWH > 0 //high
+                line.delete(linePWH)
+                linePWH := line.new(tPW, pPWH, timenow, pPWH, xloc.bar_time, extend.right, clr_range_w, linestyles, linewidths)
+                label.delete(lblPWH)
+                lblPWH := label.new(bar_index + lbl_offset, pPWH, textPWH, xloc.bar_index, style = label.style_none, textcolor = clr_range_w, size = lblsize, textalign = text.align_left, tooltip = str.tostring(pPWH))
+            if pPWM > 0 and bMid //mid
+                line.delete(linePWM)
+                linePWM := line.new(tPW, pPWM, timenow, pPWM, xloc.bar_time, extend.right, clr_range_w_mid, linestyles, linewidths)
+                label.delete(lblPWM)
+                lblPWM := label.new(bar_index + lbl_offset, pPWM, textPWM, xloc.bar_index, style = label.style_none, textcolor = clr_range_w_mid, size = lblsize, textalign = text.align_left, tooltip = str.tostring(pPWM))
+            if pPWL > 0 //low
+                line.delete(linePWL)
+                linePWL := line.new(tPW, pPWL, timenow, pPWL, xloc.bar_time, extend.right, clr_range_w, linestyles, linewidths)
+                label.delete(lblPWL)
+                lblPWL := label.new(bar_index + lbl_offset, pPWL, textPWL, xloc.bar_index, style = label.style_none, textcolor = clr_range_w, size = lblsize, textalign = text.align_left, tooltip = str.tostring(pPWL))
+    if timeframe.isintraday and oDaily > 0 and bDaily and dayofweek(timenow) != 2 //draw daily if TF less than D and not Monday (Monday is same as Weekly Open)
+        line.delete(lineDaily)
+        lineDaily := line.new(tDaily, oDaily, timenow, oDaily, xloc.bar_time, extend.right, clr_open, linestyles, linewidths)
+        label.delete(lblDaily)
+        lblDaily := label.new(bar_index + lbl_offset, oDaily, textDO, xloc.bar_index, style = label.style_none, textcolor = clr_open, size = lblsize, textalign = text.align_left, tooltip = str.tostring(oDaily))
+
+//Ichimoku Kinko Hyo
+KijunLow = ta.lowest(iIchimokuKijun)
+KijunHigh = ta.highest(iIchimokuKijun)
+KijunLow_tf = request.security(syminfo.tickerid, sIchimoku_tf, KijunLow, gaps = barmerge.gaps_on)
+KijunHigh_tf = request.security(syminfo.tickerid, sIchimoku_tf, KijunHigh, gaps = barmerge.gaps_on)
+IchimokuKijunSen = math.avg(bIchimoku_lock_lock ? KijunLow_tf : KijunLow, bIchimoku_lock_lock ? KijunHigh_tf : KijunHigh) //Kijun Sen = (Highest High + Lowest Low) / 2 for the past 26 periods //26 period moving average = Average of the past 26 closing prices
+plot(IchimokuKijunSen, 'Kijun Sen (Base Line)', color.blue, 3)
+TenkanLow = ta.lowest(iIchimokuTenkan)
+TenkanHigh = ta.highest(iIchimokuTenkan)
+TenkanLow_tf = request.security(syminfo.tickerid, sIchimoku_tf, TenkanLow, gaps = barmerge.gaps_on)
+TenkanHigh_tf = request.security(syminfo.tickerid, sIchimoku_tf, TenkanHigh, gaps = barmerge.gaps_on)
+IchimokuTenkanSen = math.avg(bIchimoku_lock_lock ? TenkanLow_tf : TenkanLow, bIchimoku_lock_lock ? TenkanHigh_tf : TenkanHigh)
+plot(IchimokuTenkanSen, 'Tenkan Sen (Conversion)', IchimokuKijunSen < IchimokuTenkanSen ? color.green : color.red, 2)
+//IKH Kumo
+SenkouA = math.avg(IchimokuTenkanSen, IchimokuKijunSen)
+SenkouLow = ta.lowest(iIchimokuSenkou)
+SenkouHigh = ta.highest(iIchimokuSenkou)
+SenkouLow_tf = request.security(syminfo.tickerid, sIchimoku_tf, SenkouLow, gaps = barmerge.gaps_on)
+SenkouHigh_tf = request.security(syminfo.tickerid, sIchimoku_tf, SenkouHigh, gaps = barmerge.gaps_on)
+SenkouB = math.avg(bIchimoku_lock_lock ? SenkouLow_tf : SenkouLow, bIchimoku_lock_lock ? SenkouHigh_tf : SenkouHigh)
+pSenkouA = plot(SenkouA, 'Senkou (Leading) Span A', bIchimokuKumo ? color.new(color.green, 60) : na, offset = iIchimokuDisplacement - 1, editable = false) //hiden
+pSenkouB = plot(SenkouB, 'Senkou (Leading) Span B', bIchimokuKumo ? color.new(color.red, 60) : na, offset = iIchimokuDisplacement - 1, editable = false) //hiden
+var color clrKumo = color.new(color.blue, 92) //default kumo color
+if not na(SenkouA) and not na(SenkouB)
+    clrKumo := SenkouA > SenkouB ? color.new(color.green, 85) : color.new(color.red, 85)
+fill(pSenkouA, pSenkouB, bIchimokuKumo ? clrKumo : na, title = 'Kumo (Cloud)', editable = false, fillgaps = true) //one color is ok
+
+//Levels
+var last_kijun = 0.0
+var last_tenkan = 0.0
+
+if IchimokuKijunSen > 0
+    last_kijun := IchimokuKijunSen
+if IchimokuTenkanSen > 0
+    last_tenkan := IchimokuTenkanSen
+
+bool newEpoch  = timeframe.change(sIchimoku_tf)
+int bar_back = bIchimoku_lock_lock ? nz(ta.barssince(newEpoch)) : 0
+
+if barstate.islast
+    if bIchimokuKijun and last_kijun > 0 //kijun sen
+        line.delete(lineKijun)
+        lineKijun := line.new(bar_index - bar_back, last_kijun, bar_index + lbl_offset, last_kijun, xloc.bar_index, extend.right, color.blue, linestyles, linewidths)
+        label.delete(lblKijun)
+        textKS = lbl_style == 'Full' ? (bIchimoku_lock ? sIchimoku_tf + ' ' : '') + 'Ichimoku Kijun Sen' : lbl_style == 'Short' ? 'Kijun' : lbl_style == 'Price' ? str.tostring(rounding(last_kijun)) : 'Kijun ' + str.tostring(rounding(last_kijun))
+        lblKijun := label.new(bar_index + lbl_offset, last_kijun, textKS, xloc.bar_index, style = label.style_none, textcolor = color.blue, size = lblsize, textalign = text.align_left, tooltip = str.tostring(last_kijun))
+    if bIchimokuTenkan and last_tenkan > 0 //tenkan sen
+        line.delete(lineTenkan)
+        lineTenkan := line.new(bar_index - bar_back, last_tenkan, bar_index + lbl_offset, last_tenkan, xloc.bar_index, extend.right, last_kijun > last_tenkan ? color.red : color.green, linestyles, linewidths)
+        label.delete(lblTenkan)
+        textTS = lbl_style == 'Full' ? (bIchimoku_lock ? sIchimoku_tf + ' ' : '') + 'Ichimoku Tenkan Sen' : lbl_style == 'Short' ? 'Tenkan' : lbl_style == 'Price' ? str.tostring(rounding(last_tenkan)) : 'Tenkan ' + str.tostring(rounding(last_tenkan))
+        lblTenkan := label.new(bar_index + lbl_offset, last_tenkan, textTS, xloc.bar_index, style = label.style_none, textcolor = last_kijun > last_tenkan ? color.red : color.green, size = lblsize, textalign = text.align_left, tooltip = str.tostring(last_tenkan))
+
+//Intraday or Weekly background candles
+[od, hd, ld, cd] = request.security(syminfo.tickerid, 'D', [open, high, low, close], lookahead = barmerge.lookahead_on) //daily
+[ow, hw, lw, cw] = request.security(syminfo.tickerid, 'W', [open, high, low, close], lookahead = barmerge.lookahead_on) //weekly
+color clrBgCandle = color.new(color.yellow, 98)
+if timeframe.isintraday and not na(od) and not na(cd)
+    clrBgCandle := od < cd ? color.new(color.green, 94) : color.new(color.red, 94)
+else if timeframe.isdaily and not na(ow) and not na(cw)
+    clrBgCandle := ow < cw ? color.new(color.green, 94) : color.new(color.red, 94)
+highest = plot(timeframe.isintraday ? hd : timeframe.isdaily ? hw : na, 'Intraday / Weekly High', clrBgCandle, 1, trackprice = true, editable = false)
+lowest = plot(timeframe.isintraday ? ld : timeframe.isdaily ? lw : na, 'Intraday / Weekly Low', clrBgCandle, 1, trackprice = true, editable = false)
+fill(highest, lowest, clrBgCandle, 'Intraday / Weekly Area', editable = false)
+
+//Info Box
+if bInfoBox
+    var table t = table.new(position.bottom_right, 2, 5, border_width = 2)
+    var color clrBg = color.new(color.blue, 80)
+    if barstate.isfirst
+        table.cell(t, 0, 0, 'Ichimoku Kinko Hyo', text_color = color.gray, text_size = size.small)
+        table.merge_cells(t, 0, 0, 1, 0)
+        table.cell(t, 0, 1, 'Kijun', text_color = color.gray, bgcolor = clrBg)
+        table.cell(t, 1, 1, 'Tenkan', text_color = color.gray, bgcolor = clrBg)
+    if barstate.islast
+        percentage_kijun = (last_kijun - close) / close
+        percentage_tenkan = (last_tenkan - close) / close
+        color clrKijun = percentage_kijun > 0 ? color.new(color.red, 80) : (percentage_kijun < 0 ? color.new(color.green, 80) : clrBg)
+        color clrTenkan = percentage_tenkan > 0 ? color.new(color.red, 80) : (percentage_tenkan < 0 ? color.new(color.green, 80) : clrBg)
+        table.cell(t, 0, 2, str.format('{0, number, #.##}', last_kijun), text_color = color.gray, bgcolor = clrKijun) //currency
+        table.cell(t, 1, 2, str.format('{0, number, #.##}', last_tenkan), text_color = color.gray, bgcolor = clrTenkan) //currency
+        table.cell(t, 0, 3, str.format('{0, number, #.##%}', percentage_kijun), text_color = color.gray, bgcolor = clrKijun) //percent
+        table.cell(t, 1, 3, str.format('{0, number, #.##%}', percentage_tenkan), text_color = color.gray, bgcolor = clrTenkan) //percent
+        table.cell(t, 0, 4, (bIchimoku_lock ? '(Locked to ' + sIchimoku_tf + ' on ' + sIchimoku_lock + ')' : ''), text_color = color.gray, text_size = size.tiny)
+        table.merge_cells(t, 0, 4, 1, 4)
