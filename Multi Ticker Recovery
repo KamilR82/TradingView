@@ -1,0 +1,39 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Kamil_Rumanovsky
+
+//@version=6
+indicator(title = 'Multi Ticker Recovery', shorttitle = 'Recovery', overlay = false, format = format.percent, precision = 2)
+
+t0 = syminfo.tickerid //actual
+t1 = input.symbol('BINANCE:BTCUSDT', 'Ticker 1')
+t2 = input.symbol('BINANCE:ETHUSDT', 'Ticker 2')
+t3 = input.symbol('BINANCE:SOLUSDT', 'Ticker 3')
+t4 = input.symbol('BINANCE:BNBUSDT', 'Ticker 4')
+t5 = input.symbol('BINANCE:XRPUSDT', 'Ticker 5')
+t6 = input.symbol('BINANCE:TRXUSDT', 'Ticker 6')
+t7 = input.symbol('BINANCE:SUIUSDT', 'Ticker 7')
+t8 = input.symbol('BINANCE:ENAUSDT', 'Ticker 8')
+
+//horizontal lines
+hline(+20, 'Upper Band', color.new(color.gray, 50), editable = false) //Upper
+hline(0, 'Zero Line', color.new(color.gray, 50), editable = false) //Mid
+hline(-20, 'Lower Band', color.new(color.gray, 50), editable = false) //Lower
+
+data(sym) =>
+    [min_oc, h, l, max_oc] = request.security(sym, timeframe.period, [math.min(open, close), high, low, math.max(open, close)])
+    wick_h = h - max_oc
+    wick_l = min_oc - l
+    if wick_h > wick_l
+        100 * (wick_h / max_oc) //percentage increase
+    else
+        -100 * (wick_l / min_oc) //percentage decrease
+
+plot(data(t0), 'Ticker 0', color.new(color.yellow, 70))
+plot(data(t1), 'Ticker 1', color.new(color.fuchsia, 70))
+plot(data(t2), 'Ticker 2', color.new(color.green, 70))
+plot(data(t3), 'Ticker 3', color.new(color.lime, 70))
+plot(data(t4), 'Ticker 4', color.new(color.aqua, 70))
+plot(data(t5), 'Ticker 5', color.new(color.olive, 70))
+plot(data(t6), 'Ticker 6', color.new(color.orange, 70))
+plot(data(t7), 'Ticker 7', color.new(color.red, 70))
+plot(data(t8), 'Ticker 8', color.new(color.teal, 70))
