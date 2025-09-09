@@ -244,16 +244,16 @@ SenkouHigh = ta.highest(iIchimokuSenkou)
 SenkouLow_tf = request.security(syminfo.tickerid, sIchimoku_tf, SenkouLow, gaps = barmerge.gaps_on)
 SenkouHigh_tf = request.security(syminfo.tickerid, sIchimoku_tf, SenkouHigh, gaps = barmerge.gaps_on)
 SenkouB = math.avg(bIchimoku_lock_lock ? SenkouLow_tf : SenkouLow, bIchimoku_lock_lock ? SenkouHigh_tf : SenkouHigh)
-pSenkouA = plot(SenkouA, 'Senkou (Leading) Span A', bIchimokuKumo ? color.new(color.green, 60) : na, offset = iIchimokuDisplacement - 1, editable = false) //hiden
-pSenkouB = plot(SenkouB, 'Senkou (Leading) Span B', bIchimokuKumo ? color.new(color.red, 60) : na, offset = iIchimokuDisplacement - 1, editable = false) //hiden
-var color clrKumo = color.new(color.blue, 92) //default kumo color
+pSenkouA = plot(SenkouA, 'Senkou (Leading) Span A', bIchimokuKumo ? color.new(color.green, 60) : na, offset = iIchimokuDisplacement - 1, editable = false) //hidden
+pSenkouB = plot(SenkouB, 'Senkou (Leading) Span B', bIchimokuKumo ? color.new(color.red, 60) : na, offset = iIchimokuDisplacement - 1, editable = false) //hidden
+color clrKumo = color.new(color.blue, 92) //default kumo color
 if not na(SenkouA) and not na(SenkouB)
     clrKumo := SenkouA > SenkouB ? color.new(color.green, 85) : color.new(color.red, 85)
-fill(pSenkouA, pSenkouB, bIchimokuKumo ? clrKumo : na, title = 'Kumo (Cloud)', editable = false, fillgaps = true) //one color is ok
+fill(pSenkouA, pSenkouB, bIchimokuKumo ? clrKumo : na, title = 'Kumo (Cloud)', editable = false, fillgaps = true)
 
 //Levels
-var last_kijun = 0.0
-var last_tenkan = 0.0
+var float last_kijun = 0.0
+var float last_tenkan = 0.0
 
 if IchimokuKijunSen > 0
     last_kijun := IchimokuKijunSen
@@ -272,10 +272,10 @@ if barstate.islast
         lblKijun := label.new(bar_index + lbl_offset, last_kijun, textKS, xloc.bar_index, style = label.style_none, textcolor = color.blue, size = lblsize, textalign = text.align_left, tooltip = str.tostring(last_kijun))
     if bIchimokuTenkan and last_tenkan > 0 //tenkan sen
         line.delete(lineTenkan)
-        lineTenkan := line.new(bar_index - bar_back, last_tenkan, bar_index + lbl_offset, last_tenkan, xloc.bar_index, extend.right, last_kijun > last_tenkan ? color.red : color.green, linestyles, linewidths)
+        lineTenkan := line.new(bar_index - bar_back, last_tenkan, bar_index + lbl_offset, last_tenkan, xloc.bar_index, extend.right, last_kijun < last_tenkan ? color.green : color.red, linestyles, linewidths)
         label.delete(lblTenkan)
         textTS = lbl_style == 'Full' ? (bIchimoku_lock ? sIchimoku_tf + ' ' : '') + 'Ichimoku Tenkan Sen' : lbl_style == 'Short' ? 'Tenkan' : lbl_style == 'Price' ? str.tostring(rounding(last_tenkan)) : 'Tenkan ' + str.tostring(rounding(last_tenkan))
-        lblTenkan := label.new(bar_index + lbl_offset, last_tenkan, textTS, xloc.bar_index, style = label.style_none, textcolor = last_kijun > last_tenkan ? color.red : color.green, size = lblsize, textalign = text.align_left, tooltip = str.tostring(last_tenkan))
+        lblTenkan := label.new(bar_index + lbl_offset, last_tenkan, textTS, xloc.bar_index, style = label.style_none, textcolor = last_kijun < last_tenkan ? color.green : color.red, size = lblsize, textalign = text.align_left, tooltip = str.tostring(last_tenkan))
 
 //Intraday or Weekly background candles
 [od, hd, ld, cd] = request.security(syminfo.tickerid, 'D', [open, high, low, close], lookahead = barmerge.lookahead_on) //daily
@@ -291,21 +291,19 @@ fill(highest, lowest, clrBgCandle, 'Intraday / Weekly Area', editable = false)
 
 //Info Box
 if bInfoBox
-    var table t = table.new(position.bottom_right, 2, 5, border_width = 2)
+    var table t = table.new(position.bottom_right, 2, 4, border_width = 2)
     var color clrBg = color.new(color.blue, 80)
     if barstate.isfirst
-        table.cell(t, 0, 0, 'Ichimoku Kinko Hyo', text_color = color.gray, text_size = size.small)
+        table.cell(t, 0, 0, 'Ichimoku', text_color = color.gray, text_size = size.small)
         table.merge_cells(t, 0, 0, 1, 0)
         table.cell(t, 0, 1, 'Kijun', text_color = color.gray, bgcolor = clrBg)
         table.cell(t, 1, 1, 'Tenkan', text_color = color.gray, bgcolor = clrBg)
+        table.cell(t, 0, 3, (bIchimoku_lock ? '(Locked to ' + sIchimoku_tf + ' on ' + sIchimoku_lock + ')' : ''), text_color = color.gray, text_size = size.tiny)
+        table.merge_cells(t, 0, 3, 1, 3)
     if barstate.islast
-        percentage_kijun = (last_kijun - close) / close
-        percentage_tenkan = (last_tenkan - close) / close
+        percentage_kijun = 100 * (last_kijun - close) / close
+        percentage_tenkan = 100 * (last_tenkan - close) / close
         color clrKijun = percentage_kijun > 0 ? color.new(color.red, 80) : (percentage_kijun < 0 ? color.new(color.green, 80) : clrBg)
         color clrTenkan = percentage_tenkan > 0 ? color.new(color.red, 80) : (percentage_tenkan < 0 ? color.new(color.green, 80) : clrBg)
-        table.cell(t, 0, 2, str.format('{0, number, #.##}', last_kijun), text_color = color.gray, bgcolor = clrKijun) //currency
-        table.cell(t, 1, 2, str.format('{0, number, #.##}', last_tenkan), text_color = color.gray, bgcolor = clrTenkan) //currency
-        table.cell(t, 0, 3, str.format('{0, number, #.##%}', percentage_kijun), text_color = color.gray, bgcolor = clrKijun) //percent
-        table.cell(t, 1, 3, str.format('{0, number, #.##%}', percentage_tenkan), text_color = color.gray, bgcolor = clrTenkan) //percent
-        table.cell(t, 0, 4, (bIchimoku_lock ? '(Locked to ' + sIchimoku_tf + ' on ' + sIchimoku_lock + ')' : ''), text_color = color.gray, text_size = size.tiny)
-        table.merge_cells(t, 0, 4, 1, 4)
+        table.cell(t, 0, 2, str.tostring(percentage_kijun, format.percent), text_color = color.gray, bgcolor = clrKijun, tooltip = str.tostring(last_kijun))
+        table.cell(t, 1, 2, str.tostring(percentage_tenkan, format.percent), text_color = color.gray, bgcolor = clrTenkan, tooltip = str.tostring(last_tenkan))
