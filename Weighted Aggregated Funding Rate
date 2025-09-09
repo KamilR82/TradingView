@@ -1,0 +1,123 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Kamil_Rumanovsky
+
+//@version=6
+indicator('Weighted Aggregated Funding Rate', 'WA-Funding', format = format.percent, precision = 4)
+
+//inputs
+source = input.source(ohlc4) //OHLC4 = (Open + High + Low + Close) ÷ 4 = arithmetical mean of Open, High, Low, and Close prices
+string weight = input.string('Volume', 'Weight', ['None', 'Volume', 'Open Interest'])
+bool bBinanceUSD = input.bool(true, 'Binance xUSD', inline = 'Binance', group = 'Aggregated Tickers')
+bool bBinanceUSDT = input.bool(true, 'Binance xUSDT', inline = 'Binance', group = 'Aggregated Tickers')
+bool bBybitUSDT = input.bool(true, 'Bybit xUSDT', inline = 'Bybit', group = 'Aggregated Tickers')
+bool bBybitUSDC = input.bool(true, 'Bybit xUSDC', inline = 'Bybit', group = 'Aggregated Tickers')
+
+//variables
+BASE_CURRENCY = syminfo.basecurrency
+
+BINANCE_USD = bBinanceUSD ? 'BINANCE:' + BASE_CURRENCY + 'USD' : ''
+BINANCE_USDT = bBinanceUSDT ? 'BINANCE:' + BASE_CURRENCY + 'USDT' : ''
+BYBIT_USDT = bBybitUSDT ? 'BYBIT:' + BASE_CURRENCY + 'USDT' : ''
+BYBIT_USDC = bBybitUSDC ? 'BYBIT:' + BASE_CURRENCY + 'USDC' : ''
+
+BINANCE_USD_P = BINANCE_USD + '.P'
+BINANCE_USDT_P = BINANCE_USDT + '.P'
+BYBIT_USDT_P = BYBIT_USDT + '.P'
+BYBIT_USDC_P = BYBIT_USDC + '.P'
+
+BINANCE_USD_OI = BINANCE_USD_P + '_OI'
+BINANCE_USDT_OI = BINANCE_USDT_P + '_OI'
+BYBIT_USDT_OI = BYBIT_USDT_P + '_OI'
+BYBIT_USDC_OI = BYBIT_USDC_P + '_OI'
+
+//functions
+request_security(string ticker) =>
+    request.security(ticker, timeframe.period, [source, volume], ignore_invalid_symbol = true)
+weighted_average(array<float> value, array<float> weight) => //SUMPRODUCT = ((v1*w1 + v2*w2 + v3*w3 + v4*w4 + ...) / (w1 + w2 + w3 + w4 + ...))
+    int i = 0
+    int count = 0
+    float sum = 0.0
+    float result = 0.0
+    while i < array.size(value)
+        v = array.get(value, i)
+        w = array.get(weight, i)
+        if not na(v) and not na(w)
+            result := result + v * w
+            sum := sum + w
+            count := count + 1
+            count
+        i := i + 1
+        i
+    result := result / sum
+    result := result / count
+    result := result * 100.0 //percentage
+    result
+
+//calculations
+
+//spot
+[s1, s1v] = request_security(BINANCE_USD)
+[s2, s2v] = request_security(BINANCE_USDT)
+[s3, s3v] = request_security(BYBIT_USDT)
+[s4, s4v] = request_security(BYBIT_USDC)
+
+//perp
+[p1, p1v] = request_security(BINANCE_USD_P)
+[p2, p2v] = request_security(BINANCE_USDT_P)
+[p3, p3v] = request_security(BYBIT_USDT_P)
+[p4, p4v] = request_security(BYBIT_USDC_P)
+
+//volume
+v1 = s1v + p1v
+v2 = s2v + p2v
+v3 = s3v + p3v
+v4 = s4v + p4v
+
+//ratio
+r1 = p1 / s1 - 1
+r2 = p2 / s2 - 1
+r3 = p3 / s3 - 1
+r4 = p4 / s4 - 1
+
+//open interest
+oi1 = request.security(BINANCE_USD_OI, timeframe.period, source, ignore_invalid_symbol = true)
+oi2 = request.security(BINANCE_USDT_OI, timeframe.period, source, ignore_invalid_symbol = true)
+oi3 = request.security(BYBIT_USDT_OI, timeframe.period, source, ignore_invalid_symbol = true)
+oi4 = request.security(BYBIT_USDC_OI, timeframe.period, source, ignore_invalid_symbol = true)
+
+//funding
+funding_binance = array.avg(array.from(r1, r2))
+funding_bybit = array.avg(array.from(r3, r4))
+funding = array.avg(array.from(r1, r2, r3, r4))
+if weight == 'Volume'
+    funding_binance := weighted_average(array.from(r1, r2), array.from(v1, v2))
+    funding_bybit := weighted_average(array.from(r3, r4), array.from(v3, v4))
+    funding := weighted_average(array.from(r1, r2, r3, r4), array.from(v1, v2, v3, v4))
+    funding
+else if weight == 'Open Interest'
+    funding_binance := weighted_average(array.from(r1, r2), array.from(oi1, oi2))
+    funding_bybit := weighted_average(array.from(r3, r4), array.from(oi3, oi4))
+    funding := weighted_average(array.from(r1, r2, r3, r4), array.from(oi1, oi2, oi3, oi4))
+    funding
+
+//visuals
+
+//horizontal lines
+hline(0.2, 'Upper Band', color.new(color.gray, 50)) //Upper
+hline(0, 'Middle Band', color.new(color.gray, 50)) //Mid
+hline(-0.2, 'Lower Band', color.new(color.gray, 50)) //Lower
+
+//graph
+line = plot(0, color = na, editable = false, display = display.none) //invisible - only for fill
+area = plot(funding, 'WA Funding Rate', color.new(color.white, 65), 1, plot.style_line)
+fill(line, area, 0.1, 0.0, title = 'Positive Funding', top_color = color.new(color.green, 0), bottom_color = color.new(color.gray, 85)) //Perp Price > Spot Price = Positive Funding
+fill(line, area, 0.0, -0.1, title = 'Negative Funding', top_color = color.new(color.gray, 85), bottom_color = color.new(color.red, 0)) //Perp Price < Spot Price = Negative Funding
+plot(funding_binance, 'Binance', color.yellow, 1, plot.style_line, display = display.none)
+plot(funding_bybit, 'ByBit', color.blue, 1, plot.style_line, display = display.none)
+
+//text
+var table tt = table.new(position.top_right, 1, 1)
+var table tb = table.new(position.bottom_right, 1, 1)
+if barstate.islast
+    table.cell(tt, 0, 0, 'Perp > Spot', text_color = color.green)
+    table.cell(tb, 0, 0, 'Perp < Spot', text_color = color.red)
