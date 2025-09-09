@@ -1,0 +1,79 @@
+//@version=6
+indicator(title = 'Mean Reversion Alarm', shorttitle = 'MRA', overlay = false, format = format.percent, precision = 2)
+
+string tf = input.string(defval = 'D', title = 'Ichimoku TF', options = ['D', '2D', '3D', 'W', 'M'], inline = 'ichimoku') //input.timeframe('D', 'Ichimoku TF')
+int iIchimokuKijun = input.int(60, 'Kijun', minval = 2, tooltip = '24 forex / 60 crypto', inline = 'ichimoku')
+int iLastBars = input.int(10, 'Last Bars', minval = 1, inline = 'filter')
+int iChange = input.int(15, 'Change %', minval = 1, inline = 'filter')
+bool bFilter = input.bool(true, 'Filter (Last Bars / %)', inline = 'checkbox')
+bool bAlarm = input.bool(true, 'Alarm (Price cross Kijun)', inline = 'checkbox')
+
+t0 = syminfo.tickerid //actual
+t1 = input.symbol('BINANCE:BTCUSDT', 'Ticker 1')
+t2 = input.symbol('BINANCE:ETHUSDT', 'Ticker 2')
+t3 = input.symbol('BINANCE:BNBUSDT', 'Ticker 3')
+t4 = input.symbol('BINANCE:SOLUSDT', 'Ticker 4')
+t5 = input.symbol('BINANCE:DOGEUSDT', 'Ticker 5')
+t6 = input.symbol('BINANCE:SHIBUSDT', 'Ticker 6')
+t7 = input.symbol('BINANCE:PEPEUSDT', 'Ticker 7')
+t8 = input.symbol('BINANCE:BONKUSDT', 'Ticker 8')
+
+//horizontal lines
+hline(+iChange, 'Upper Band', color.new(color.gray, 50)) //Upper
+hline(0, 'Cross Line', color.new(color.yellow, 50)) //Mid
+hline(-iChange, 'Lower Band', color.new(color.gray, 50)) //Lower
+
+//actual ticker - t0 - plot & alarm
+[h, l] = request.security(t0, timeframe.period, [high, low]) //tf
+Kijun = request.security(t0, tf, math.avg(ta.lowest(iIchimokuKijun), ta.highest(iIchimokuKijun)))
+
+curve = 0.0
+if l > Kijun
+    curve := 100 * (l / Kijun - 1)
+if h < Kijun
+    curve := h / Kijun * 100 - 100
+plot(curve, 'Price vs Kijun Line')
+
+crossdown = ta.crossunder(curve, 0.1)
+crossup = ta.crossover(curve, -0.1)
+
+curveh = ta.highest(curve, iLastBars) //Last Bars High
+curvel = ta.lowest(curve, iLastBars) //Last Bars Low
+plot(curveh, 'Last Bars High', color.new(color.gray, 70), 1)
+plot(curvel, 'Last Bars Low', color.new(color.gray, 70), 1)
+
+plotchar(crossdown and (curveh > +iChange or not bFilter), 'Cross mark - from above', '▼', location = location.top, color = color.lime, size = size.tiny)
+plotchar(crossup and (curvel < -iChange or not bFilter), 'Cross mark - from below', '▲', location = location.bottom, color = color.red, size = size.tiny)
+
+if bAlarm
+    if crossdown and (curveh > +iChange or not bFilter)
+        alert(t0 + ' reached Mean Reversion from above', alert.freq_once_per_bar) //freq_all
+    else if crossup and (curvel < -iChange or not bFilter)
+        alert(t0 + ' reached Mean Reversion from below', alert.freq_once_per_bar) //freq_all
+
+//other tickers t1-t8 - only alarm
+function_trigger(_ticker) =>
+    [_h, _l, _Kijun] = request.security(_ticker, tf, [high, low, math.avg(ta.lowest(iIchimokuKijun), ta.highest(iIchimokuKijun))])
+    _curve = 0.0
+    if _l > _Kijun
+        _curve := 100 * (_l / _Kijun - 1)
+    if _h < _Kijun
+        _curve := _h / _Kijun * 100 - 100
+    _crossdown = ta.crossunder(_curve, 0.1)
+    _crossup = ta.crossover(_curve, -0.1)
+    _curveh = ta.highest(_curve, iLastBars) //Last Bars High
+    _curvel = ta.lowest(_curve, iLastBars) //Last Bars Low
+    if bAlarm
+        if _crossdown and (_curveh > +iChange or not bFilter)
+            alert(_ticker + ' reached Mean Reversion from above', alert.freq_once_per_bar)
+        else if _crossup and (_curvel < -iChange or not bFilter)
+            alert(_ticker + ' reached Mean Reversion from below', alert.freq_once_per_bar)
+
+function_trigger(t1)
+function_trigger(t2)
+function_trigger(t3)
+function_trigger(t4)
+function_trigger(t5)
+function_trigger(t6)
+function_trigger(t7)
+function_trigger(t8)
