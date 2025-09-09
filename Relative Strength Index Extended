@@ -1,0 +1,97 @@
+//@version=6
+indicator(title = 'Relative Strength Index Extended', shorttitle = 'RSI', format = format.percent, precision = 2)
+
+//Global Functions
+inRange(sess, zone = syminfo.timezone) =>
+    na(time(timeframe.period, sess, zone)) == false
+
+isTFless(tf, including = true) => //is selected chart TF less or equal than input string value (30,60,480,D,W,M)
+    including ? timeframe.in_seconds() <= timeframe.in_seconds(tf) : timeframe.in_seconds() < timeframe.in_seconds(tf)
+
+getRatio(x, y) => //percentage change (increase/decrease)
+    100 * (y - x) / x
+
+//Horizontal Lines
+hline(+80, 'Upper Band', color.new(color.red, 70)) //Upper
+hline(+50, 'Upper Band', color.new(color.gray, 70)) //Upper
+hline(0, 'Middle Line', color.new(color.yellow, 60)) //Mid
+hline(-50, 'Lower Band', color.new(color.gray, 70)) //Lower
+hline(-80, 'Lower Band', color.new(color.green, 70)) //Lower
+
+// Weekend Volume Ratio
+getWVR() =>
+    var ratio = 0.0
+    var change = 0.0
+    switch_var_0 = dayofweek(time)
+    switch switch_var_0
+        dayofweek.sunday => 
+    	    //Sunday
+    	    ratio := getRatio((volume[6] + volume[5] + volume[4] + volume[3] + volume[2]) / 5, volume)
+    	    week_max = math.max(close[6], close[5], close[4], close[3], close[2], close[1])
+    	    week_min = math.min(close[6], close[5], close[4], close[3], close[2], close[1])
+    	    if close > week_max
+    	        change := close - week_max
+    	    else if close < week_min
+    	        change := close - week_min
+        dayofweek.saturday => 
+    	    //Saturday
+    	    ratio := getRatio((volume[5] + volume[4] + volume[3] + volume[2] + volume[1]) / 5, volume)
+    	    week_max = math.max(close[5], close[4], close[3], close[2], close[1])
+    	    week_min = math.min(close[5], close[4], close[3], close[2], close[1])
+    	    if close > week_max
+    	        change := close - week_max
+    	    else if close < week_min
+    	        change := close - week_min
+        =>  //waiting for the weekend
+    	    ratio := 0.0
+    	    change := 0.0
+    [ratio, change] //change = weekend close is higher than the highest of the working days
+
+[wvr_ratio, wvr_change] = request.security(syminfo.tickerid, 'D', getWVR(), lookahead = barmerge.lookahead_on)
+plot(timeframe.isdaily and wvr_ratio != 0 ? wvr_ratio : na, 'Weekend Volume Ratio', wvr_change == 0 ? color.rgb(255, 255, 120, 75) : wvr_change > 0 ? color.rgb(0, 255, 0, 50) : color.rgb(255, 0, 0, 40), style = plot.style_columns) //only on Daily
+
+// Weekend
+bgcolor(isTFless('D') and inRange('0000-0000:17') ? color.rgb(255, 0, 0, 80) : na, title = 'Weekend')
+
+// Stock Exchanges Trading Hours
+bgcolor(isTFless('30') and inRange('0900-1130,1230-1500:23456', 'Asia/Tokyo') ? color.rgb(0, 255, 0, 92) : na, title = 'Tokyo SE Trading Hours') //GMT 00:00-02:30; 03:30-06:00
+bgcolor(isTFless('30') and inRange('0800-1630:23456', 'Europe/London') ? color.rgb(0, 160, 255, 92) : na, title = 'London SE Trading Hours') //GMT 08:00-16:30
+bgcolor(isTFless('30') and inRange('0930-1600:23456', 'America/New_York') ? color.rgb(255, 255, 0, 92) : na, title = 'New York SE Trading Hours') //GMT 14:30-21:00
+
+// Relative Strength Index
+rsiLength = input.int(14, minval = 1, title = 'RSI Periods Length', group = 'Relative Strength Index')
+rsi = 2 * (ta.rsi(close, rsiLength) - 50) //stretch from +-50% to +-100%
+rsiPlot = plot(rsi, 'RSI', color.yellow)
+
+rsiD = request.security(syminfo.tickerid, 'D', ta.rsi(close, rsiLength), lookahead = barmerge.lookahead_on)
+plot(isTFless('D', false) ? 2 * (rsiD - 50) : na, 'RSI-Daily', color.new(color.lime, 40))
+
+rsiW = request.security(syminfo.tickerid, 'W', ta.rsi(close, rsiLength), lookahead = barmerge.lookahead_on)
+plot(isTFless('W', false) ? 2 * (rsiW - 50) : na, 'RSI-Weekly', color.new(color.teal, 20))
+
+// RSI - Gradient Fill
+midLinePlot = plot(0, color = na, editable = false, display = display.none)
+fill(rsiPlot, midLinePlot, 80, 50, top_color = color.new(color.red, 0), bottom_color = color.new(color.red, 100), title = 'Overbought Gradient Fill')
+fill(rsiPlot, midLinePlot, -50, -80, top_color = color.new(color.green, 100), bottom_color = color.new(color.green, 0), title = 'Oversold Gradient Fill')
+
+// RSI - Divergence
+barsInRange(cond, min = 5, max = 60) =>
+    int bars = ta.barssince(cond)
+    min <= bars and bars <= max
+
+int barsLookback = 5
+
+bool plFound = na(ta.pivotlow(rsi, barsLookback, barsLookback)) ? false : true
+bool phFound = na(ta.pivothigh(rsi, barsLookback, barsLookback)) ? false : true
+
+bool plRange = barsInRange(plFound[1])
+bool phRange = barsInRange(phFound[1])
+
+// Regular Bullish
+rsiHL = rsi[barsLookback] > ta.valuewhen(plFound, rsi[barsLookback], 1) and plRange // rsi: Higher Low
+priceLL = low[barsLookback] < ta.valuewhen(plFound, low[barsLookback], 1) // price: Lower Low
+plot(plFound ? rsi[barsLookback] : na, 'Regular Bullish', priceLL and rsiHL and plFound ? color.green : na, 2, offset = -barsLookback, display = display.pane)
+// Regular Bearish
+rsiLH = rsi[barsLookback] < ta.valuewhen(phFound, rsi[barsLookback], 1) and phRange // rsi: Lower High
+priceHH = high[barsLookback] > ta.valuewhen(phFound, high[barsLookback], 1) // price: Higher High
+plot(phFound ? rsi[barsLookback] : na, 'Regular Bearish', priceHH and rsiLH and phFound ? color.red : na, 2, offset = -barsLookback, display = display.pane)
